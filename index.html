@@ -1,0 +1,29 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Prism | Bookmark Manager</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="app-container">
+        <nav class="sidebar">
+            <div class="sidebar-header">
+                <h2>Prism</h2>
+            </div>
+            <div class="search-container">
+                <input type="text" id="search-input" placeholder="Search bookmarks...">
+            </div>
+            <div class="folder-tree" id="folder-tree"></div>
+        </nav>
+        <main class="main-content">
+            <header class="main-header">
+                <h1 id="current-folder-title">Bookmarks Bar</h1>
+            </header>
+            <div class="bookmark-grid" id="bookmark-grid"></div>
+        </main>
+    </div>
+    <script src="app.js"></script>
+</body>
+</html>

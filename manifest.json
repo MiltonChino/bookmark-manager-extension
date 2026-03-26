@@ -1,0 +1,16 @@
+﻿{
+  "manifest_version": 3,
+  "name": "Prism Bookmarks",
+  "version": "1.0",
+  "description": "A stunning, modern Native Chrome Bookmark Manager with a glassmorphism interface.",
+  "action": {
+    "default_title": "Open Bookmarks Manager"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "permissions": [
+    "bookmarks",
+    "tabs"
+  ]
+}
