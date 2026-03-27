@@ -90,22 +90,30 @@ document.addEventListener("DOMContentLoaded", () => {
         chrome.bookmarks.getChildren(currentFolderId, renderBookmarks);
     }
 
-    function createBookmarkCard(bookmark) {
-        const card = document.createElement("a");
-        card.className = "bookmark-card";
-        card.href = bookmark.url;
-        card.target = "_blank";
-        card.dataset.id = bookmark.id;
+    function createItemCard(node) {
+        const isFolder = !node.url;
+        const card = document.createElement(isFolder ? "div" : "a");
+        card.className = "bookmark-card" + (isFolder ? " is-folder" : "");
+        if (!isFolder) {
+            card.href = node.url;
+            card.target = "_blank";
+        }
+        card.dataset.id = node.id;
         card.draggable = true;
         
-        const iconUrl = getFaviconUrl(bookmark.url);
-        const imgTag = iconUrl ? `<img src="${iconUrl}" alt="">` : `<span>🌐</span>`;
+        let iconHtml;
+        if (isFolder) {
+            iconHtml = `<span style="font-size: 1.2rem;">📁</span>`;
+        } else {
+            const iconUrl = getFaviconUrl(node.url);
+            iconHtml = iconUrl ? `<img src="${iconUrl}" alt="">` : `<span>🌐</span>`;
+        }
         
         card.innerHTML = `
-            <div class="bookmark-icon">${imgTag}</div>
+            <div class="bookmark-icon">${iconHtml}</div>
             <div class="bookmark-meta">
-                <div class="bookmark-title">${bookmark.title || "Untitled"}</div>
-                <div class="bookmark-url">${bookmark.url}</div>
+                <div class="bookmark-title">${node.title || "Untitled"}</div>
+                ${!isFolder ? `<div class="bookmark-url">${node.url}</div>` : ""}
             </div>
         `;
         
@@ -134,23 +142,139 @@ document.addEventListener("DOMContentLoaded", () => {
             if (e.ctrlKey || e.metaKey || e.shiftKey) {
                 e.preventDefault();
                 card.classList.toggle("selected");
+            } else if (isFolder) {
+                // Double-click to open folder? Actually, a single click on a folder in the grid could just open it, 
+                // but let's make it a double click to avoid annoying users if they misclick while selecting
+                // Wait, native behavior is usually double click. Let's do double click for now:
             }
         });
+
+        if (isFolder) {
+            card.addEventListener("dblclick", () => {
+                document.querySelectorAll(".folder-item").forEach(el => el.classList.remove("active"));
+                const sidebarRow = document.querySelector(`.folder-item[data-id="${node.id}"]`);
+                if(sidebarRow) sidebarRow.classList.add("active");
+                currentFolderTitle.textContent = node.title;
+                currentFolderId = node.id;
+                reloadCurrentFolder();
+            });
+            // Also allow folder card to be a drop target for moving INTO it
+            card.addEventListener("dragover", (e) => {
+                const targetCard = e.target.closest('.bookmark-card');
+                const rect = targetCard.getBoundingClientRect();
+                const xRatio = (e.clientX - rect.left) / rect.width;
+                const yRatio = (e.clientY - rect.top) / rect.height;
+                // Center 50% = drop into folder
+                if (xRatio > 0.25 && xRatio < 0.75 && yRatio > 0.25 && yRatio < 0.75) {
+                    e.preventDefault();
+                    e.stopPropagation(); // prevent grid dragover handling
+                    document.querySelectorAll('.drag-over-before, .drag-over-after').forEach(el => el.classList.remove('drag-over-before', 'drag-over-after'));
+                    card.classList.add("drag-over-into");
+                    e.dataTransfer.dropEffect = "move";
+                }
+            });
+            card.addEventListener("dragleave", () => card.classList.remove("drag-over-into"));
+            card.addEventListener("drop", (e) => {
+                if (card.classList.contains("drag-over-into")) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    card.classList.remove("drag-over-into");
+                    
+                    const data = e.dataTransfer.getData("application/json");
+                    if (data) {
+                        try {
+                            const idsToMove = JSON.parse(data);
+                            if (idsToMove.includes(node.id)) return; // can't move a folder into itself
+                            Promise.all(idsToMove.map(id => chrome.bookmarks.move(id, { parentId: node.id }))).then(() => {
+                                clearSelection();
+                                reloadCurrentFolder();
+                            });
+                        } catch (err) {}
+                    }
+                }
+            });
+        }
 
         return card;
     }
 
     function renderBookmarks(nodes) {
         bookmarkGrid.innerHTML = "";
-        const links = nodes.filter(n => n.url);
-        if (links.length === 0) {
-            bookmarkGrid.innerHTML = '<p style="color: var(--text-secondary); grid-column: 1/-1; text-align: center;">No links in this folder</p>';
+        if (nodes.length === 0) {
+            bookmarkGrid.innerHTML = '<p style="color: var(--text-secondary); grid-column: 1/-1; text-align: center;">This folder is empty</p>';
             return;
         }
-        links.forEach(link => {
-            bookmarkGrid.appendChild(createBookmarkCard(link));
+        nodes.forEach(node => {
+            bookmarkGrid.appendChild(createItemCard(node));
         });
     }
+
+    // Grid Drag and Drop Reordering
+    bookmarkGrid.addEventListener("dragover", (e) => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "move";
+
+        const targetCard = e.target.closest(".bookmark-card");
+        document.querySelectorAll(".drag-over-before, .drag-over-after").forEach(el => el.classList.remove("drag-over-before", "drag-over-after"));
+
+        if (targetCard && !targetCard.classList.contains("dragging") && !targetCard.classList.contains("drag-over-into")) {
+            const rect = targetCard.getBoundingClientRect();
+            // Use X axis for horizontal row flow
+            const xRatio = (e.clientX - rect.left) / rect.width;
+            if (xRatio > 0.5) {
+                targetCard.classList.add("drag-over-after");
+            } else {
+                targetCard.classList.add("drag-over-before");
+            }
+        }
+    });
+
+    bookmarkGrid.addEventListener("dragleave", (e) => {
+        if (!bookmarkGrid.contains(e.relatedTarget)) {
+            document.querySelectorAll(".drag-over-before, .drag-over-after").forEach(el => el.classList.remove("drag-over-before", "drag-over-after"));
+        }
+    });
+
+    bookmarkGrid.addEventListener("drop", async (e) => {
+        // Did we drop onto a card to move into it? (handled by card drop)
+        if (e.target.closest('.drag-over-into')) return;
+
+        e.preventDefault();
+        
+        const targetCard = document.querySelector(".drag-over-before, .drag-over-after");
+        document.querySelectorAll(".drag-over-before, .drag-over-after").forEach(el => el.classList.remove("drag-over-before", "drag-over-after"));
+
+        const dataText = e.dataTransfer.getData("application/json");
+        if (!dataText || !targetCard) return;
+
+        try {
+            const idsToMove = JSON.parse(dataText);
+            if (!idsToMove.length) return;
+
+            let targetId = targetCard.dataset.id;
+            let insertAfter = targetCard.classList.contains("drag-over-after");
+
+            if (idsToMove.includes(targetId)) return; // Prevent target reference loops
+
+            for (let i = 0; i < idsToMove.length; i++) {
+                const id = idsToMove[i];
+                const newChildren = await new Promise(r => chrome.bookmarks.getChildren(currentFolderId, r));
+                let baseIndex = newChildren.findIndex(c => c.id === targetId);
+                if (baseIndex === -1) break;
+
+                let insertIndex = insertAfter ? baseIndex + 1 : baseIndex;
+                await new Promise(r => chrome.bookmarks.move(id, { parentId: currentFolderId, index: insertIndex }, r));
+
+                targetId = id;
+                insertAfter = true;
+            }
+
+            clearSelection();
+            reloadCurrentFolder();
+        } catch (err) {
+            console.error("Drop failed:", err);
+        }
+    });
 
     function createFolderNode(node, depth = 0) {
         if (node.url) return null; // We only render folders in the sidebar
