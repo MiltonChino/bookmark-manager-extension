@@ -473,6 +473,64 @@ document.addEventListener("DOMContentLoaded", () => {
         contextMenu.style.top = `${y}px`;
     });
 
+    function showEditModal(title, url, isFolder, onSave) {
+        const overlay = document.createElement("div");
+        overlay.className = "modal-overlay";
+        
+        const safeTitle = title ? title.replace(/"/g, '&quot;') : "";
+        const safeUrl = url ? url.replace(/"/g, '&quot;') : "";
+        
+        const html = `
+            <div class="modal-content">
+                <h3>${isFolder ? "Edit Folder" : "Edit Bookmark"}</h3>
+                <div class="modal-input-group">
+                    <label>Name</label>
+                    <input type="text" id="modal-title-input" value="${safeTitle}">
+                </div>
+                ${!isFolder ? `
+                <div class="modal-input-group">
+                    <label>URL</label>
+                    <input type="text" id="modal-url-input" value="${safeUrl}">
+                </div>
+                ` : ""}
+                <div class="modal-buttons">
+                    <button class="modal-btn modal-btn-cancel" id="modal-btn-cancel">Cancel</button>
+                    <button class="modal-btn modal-btn-save" id="modal-btn-save">Save</button>
+                </div>
+            </div>
+        `;
+        overlay.innerHTML = html;
+        document.body.appendChild(overlay);
+        
+        const titleInput = overlay.querySelector("#modal-title-input");
+        const urlInput = overlay.querySelector("#modal-url-input");
+        const cancelBtn = overlay.querySelector("#modal-btn-cancel");
+        const saveBtn = overlay.querySelector("#modal-btn-save");
+        
+        titleInput.focus();
+        
+        function close() {
+            overlay.remove();
+        }
+        
+        cancelBtn.addEventListener("click", close);
+        overlay.addEventListener("mousedown", (e) => {
+            if (e.target === overlay) close();
+        });
+        
+        saveBtn.addEventListener("click", () => {
+            const newTitle = titleInput.value.trim();
+            const newUrl = urlInput ? urlInput.value.trim() : null;
+            onSave(newTitle, newUrl);
+            close();
+        });
+        
+        overlay.addEventListener("keydown", (e) => {
+            if (e.key === "Enter") saveBtn.click();
+            if (e.key === "Escape") close();
+        });
+    }
+
     document.addEventListener("click", (e) => {
         if (e.target.closest(".context-menu")) {
             const id = e.target.id;
@@ -480,29 +538,32 @@ document.addEventListener("DOMContentLoaded", () => {
             if (id === "ctx-rename") {
                 chrome.bookmarks.get(currentContextNodeId, (results) => {
                     if (results.length) {
-                        const newTitle = prompt("Enter new folder name:", results[0].title);
-                        if (newTitle !== null && newTitle.trim() !== "") {
-                            chrome.bookmarks.update(currentContextNodeId, { title: newTitle.trim() }, () => {
-                                reloadCurrentFolder();
-                                chrome.bookmarks.getTree(renderFolders);
-                            });
-                        }
+                        showEditModal(results[0].title, null, true, (newTitle, _) => {
+                            if (newTitle !== "") {
+                                chrome.bookmarks.update(currentContextNodeId, { title: newTitle }, () => {
+                                    reloadCurrentFolder();
+                                    chrome.bookmarks.getTree(renderFolders);
+                                });
+                            }
+                        });
                     }
                 });
             } else if (id === "ctx-edit") {
                 chrome.bookmarks.get(currentContextNodeId, (results) => {
                     if (results.length) {
-                        const newTitle = prompt("Enter new bookmark name:", results[0].title);
-                        if (newTitle === null) return;
-                        
-                        const newUrl = prompt("Enter new URL:", results[0].url || "");
-                        if (newUrl === null) return;
-                        
-                        chrome.bookmarks.update(currentContextNodeId, { 
-                            title: newTitle.trim(),
-                            url: newUrl.trim()
-                        }, () => {
-                            reloadCurrentFolder();
+                        showEditModal(results[0].title, results[0].url, false, (newTitle, newUrl) => {
+                            if (newTitle !== "") {
+                                let finalUrl = newUrl;
+                                if (finalUrl && !/^https?:\/\//i.test(finalUrl) && !finalUrl.startsWith('chrome://') && !finalUrl.startsWith('file://')) {
+                                    finalUrl = 'http://' + finalUrl;
+                                }
+                                chrome.bookmarks.update(currentContextNodeId, { 
+                                    title: newTitle,
+                                    url: finalUrl
+                                }, () => {
+                                    reloadCurrentFolder();
+                                });
+                            }
                         });
                     }
                 });
