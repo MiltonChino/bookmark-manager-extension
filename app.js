@@ -6,6 +6,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const mainContent = document.querySelector(".main-content");
     
     let currentFolderId = "1"; // Default Bookmarks Bar
+    const expandedFolders = new Set(); // To maintain sidebar state
     
     // --- Selection Box Logistics ---
     let isSelecting = false;
@@ -332,7 +333,17 @@ document.addEventListener("DOMContentLoaded", () => {
                 const isExpanded = childrenContainer.style.display !== "none";
                 childrenContainer.style.display = isExpanded ? "none" : "block";
                 arrowBtn.innerHTML = isExpanded ? "▶" : "▼";
+                if (isExpanded) {
+                    expandedFolders.delete(node.id);
+                } else {
+                    expandedFolders.add(node.id);
+                }
             });
+
+            if (expandedFolders.has(node.id)) {
+                childrenContainer.style.display = "block";
+                arrowBtn.innerHTML = "▼";
+            }
         }
 
         // Drag Events for Folder Drop Targets
@@ -411,6 +422,108 @@ document.addEventListener("DOMContentLoaded", () => {
                 currentFolderId = "1";
                 renderBookmarks(children);
             });
+        }
+    });
+
+    // --- Custom Context Menu ---
+    const contextMenu = document.createElement("div");
+    contextMenu.className = "context-menu";
+    contextMenu.style.display = "none";
+    document.body.appendChild(contextMenu);
+
+    let currentContextNodeId = null;
+    let currentContextIsFolder = false;
+
+    document.addEventListener("contextmenu", (e) => {
+        const card = e.target.closest(".bookmark-card");
+        const folderItem = e.target.closest(".folder-item");
+        
+        let targetEl = card || folderItem;
+        if (!targetEl) {
+            contextMenu.style.display = "none";
+            return;
+        }
+
+        e.preventDefault();
+        
+        currentContextNodeId = targetEl.dataset.id;
+        currentContextIsFolder = card ? card.classList.contains("is-folder") : !!folderItem;
+
+        contextMenu.innerHTML = currentContextIsFolder ? `
+            <div class="context-menu-item" id="ctx-rename">✏️ Rename</div>
+            <div class="context-menu-divider"></div>
+            <div class="context-menu-item" id="ctx-delete" style="color: #ef4444;">🗑️ Delete</div>
+        ` : `
+            <div class="context-menu-item" id="ctx-edit">✏️ Edit Label/URL</div>
+            <div class="context-menu-divider"></div>
+            <div class="context-menu-item" id="ctx-delete" style="color: #ef4444;">🗑️ Delete</div>
+        `;
+        
+        // Ensure menu doesn't go off-screen
+        contextMenu.style.display = "block";
+        const menuRect = contextMenu.getBoundingClientRect();
+        
+        let x = e.pageX;
+        let y = e.pageY;
+        
+        if (x + menuRect.width > window.innerWidth) x -= menuRect.width;
+        if (y + menuRect.height > window.innerHeight) y -= menuRect.height;
+        
+        contextMenu.style.left = `${x}px`;
+        contextMenu.style.top = `${y}px`;
+    });
+
+    document.addEventListener("click", (e) => {
+        if (e.target.closest(".context-menu")) {
+            const id = e.target.id;
+            
+            if (id === "ctx-rename") {
+                chrome.bookmarks.get(currentContextNodeId, (results) => {
+                    if (results.length) {
+                        const newTitle = prompt("Enter new folder name:", results[0].title);
+                        if (newTitle !== null && newTitle.trim() !== "") {
+                            chrome.bookmarks.update(currentContextNodeId, { title: newTitle.trim() }, () => {
+                                reloadCurrentFolder();
+                                chrome.bookmarks.getTree(renderFolders);
+                            });
+                        }
+                    }
+                });
+            } else if (id === "ctx-edit") {
+                chrome.bookmarks.get(currentContextNodeId, (results) => {
+                    if (results.length) {
+                        const newTitle = prompt("Enter new bookmark name:", results[0].title);
+                        if (newTitle === null) return;
+                        
+                        const newUrl = prompt("Enter new URL:", results[0].url || "");
+                        if (newUrl === null) return;
+                        
+                        chrome.bookmarks.update(currentContextNodeId, { 
+                            title: newTitle.trim(),
+                            url: newUrl.trim()
+                        }, () => {
+                            reloadCurrentFolder();
+                        });
+                    }
+                });
+            } else if (id === "ctx-delete") {
+                if (confirm("Are you sure you want to delete this?")) {
+                    if (currentContextIsFolder) {
+                        chrome.bookmarks.removeTree(currentContextNodeId, () => {
+                            reloadCurrentFolder();
+                            chrome.bookmarks.getTree(renderFolders);
+                        });
+                    } else {
+                        chrome.bookmarks.remove(currentContextNodeId, () => {
+                            reloadCurrentFolder();
+                        });
+                    }
+                }
+            }
+            contextMenu.style.display = "none";
+        } else {
+            // Clicked outside
+            contextMenu.style.display = "none";
         }
     });
 });
